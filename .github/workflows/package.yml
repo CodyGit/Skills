@@ -36,3 +36,36 @@ jobs:
               --target "$GITHUB_SHA"
           fi
           gh release upload latest dist/* --clobber
+
+      - name: 同步到 Gitee Release
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_REPO: cody/Skills
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          api="https://gitee.com/api/v5/repos/$GITEE_REPO"
+
+          # 取 latest release，不存在则创建（tag 不存在时 Gitee 会基于 target_commitish 新建）
+          rid=$(curl -sf "$api/releases/tags/latest?access_token=$GITEE_TOKEN" | jq -r '.id // empty' || true)
+          if [ -z "$rid" ]; then
+            rid=$(curl -sf -X POST "$api/releases" \
+              -F access_token="$GITEE_TOKEN" \
+              -F tag_name=latest \
+              -F name=Latest \
+              -F body="各 skill 的最新安装包，每次构建后覆盖同名附件。" \
+              -F target_commitish="$BRANCH" | jq -r '.id')
+          fi
+          [ -n "$rid" ] && [ "$rid" != "null" ] || { echo "获取 Gitee release id 失败" >&2; exit 1; }
+
+          # Gitee 没有 --clobber：先删同名附件，再上传
+          for f in dist/*; do
+            name=$(basename "$f")
+            curl -sf "$api/releases/$rid/attach_files?access_token=$GITEE_TOKEN&per_page=100" \
+              | jq -r --arg n "$name" '.[] | select(.name==$n) | .id' \
+              | while read -r fid; do
+                  curl -sf -X DELETE "$api/releases/$rid/attach_files/$fid?access_token=$GITEE_TOKEN" >/dev/null
+                done
+            curl -sf -X POST "$api/releases/$rid/attach_files" \
+              -F access_token="$GITEE_TOKEN" -F file=@"$f" >/dev/null
+            echo "已上传 $name"
+          done
