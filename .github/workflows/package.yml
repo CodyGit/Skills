@@ -1,0 +1,38 @@
+# date: 2026-11-17 11:20
+# author: cody
+# description: 推送到主分支时，把每个 skill 打包并上传到 tag 为 latest 的 Release，同名附件覆盖
+
+name: package
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: package
+  cancel-in-progress: false
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 打包
+        run: python3 ci/package.py
+
+      - name: 发布到 latest Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view latest >/dev/null 2>&1; then
+            gh release create latest \
+              --title "Latest" \
+              --notes "各 skill 的最新安装包，每次构建后覆盖同名附件。" \
+              --target "$GITHUB_SHA"
+          fi
+          gh release upload latest dist/* --clobber
