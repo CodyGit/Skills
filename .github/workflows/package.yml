@@ -40,22 +40,26 @@ jobs:
       - name: 同步到 Gitee Release
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          GITEE_REPO: cody/Skills
+          GITEE_REPO: codygiter/Skills
           BRANCH: ${{ github.ref_name }}
         run: |
           api="https://gitee.com/api/v5/repos/$GITEE_REPO"
 
           # 取 latest release，不存在则创建（tag 不存在时 Gitee 会基于 target_commitish 新建）
-          rid=$(curl -sf "$api/releases/tags/latest?access_token=$GITEE_TOKEN" | jq -r '.id // empty' || true)
+          resp=$(curl -s -w '\n%{http_code}' "$api/releases/tags/latest?access_token=$GITEE_TOKEN")
+          echo "GET release: HTTP ${resp##*$'\n'} ${resp%$'\n'*}"
+          rid=$(printf '%s' "${resp%$'\n'*}" | jq -r '.id // empty' 2>/dev/null || true)
           if [ -z "$rid" ]; then
-            rid=$(curl -sf -X POST "$api/releases" \
+            resp=$(curl -s -w '\n%{http_code}' -X POST "$api/releases" \
               -F access_token="$GITEE_TOKEN" \
               -F tag_name=latest \
               -F name=Latest \
               -F body="各 skill 的最新安装包，每次构建后覆盖同名附件。" \
-              -F target_commitish="$BRANCH" | jq -r '.id')
+              -F target_commitish="$BRANCH")
+            echo "POST release: HTTP ${resp##*$'\n'} ${resp%$'\n'*}"
+            rid=$(printf '%s' "${resp%$'\n'*}" | jq -r '.id // empty' 2>/dev/null || true)
           fi
-          [ -n "$rid" ] && [ "$rid" != "null" ] || { echo "获取 Gitee release id 失败" >&2; exit 1; }
+          [ -n "$rid" ] || { echo "获取 Gitee release id 失败" >&2; exit 1; }
 
           # Gitee 没有 --clobber：先删同名附件，再上传
           for f in dist/*; do
